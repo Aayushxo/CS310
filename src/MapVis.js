@@ -8,10 +8,15 @@ import rungeKutta from 'runge-kutta';
 
 function MapVis() {
 
+  var data, g, path, S, I, R, colorScale, svg, countryCode, valueWanted;
+  //creating an empty dictionary to store SIR model results for each country
+  let SIRArray = new Map();
+  let time = 0;
+
   const ref = useRef();
 
   useEffect(() => {
-    const svg = d3.select(ref.current)
+    svg = d3.select(ref.current)
       .attr("width", 1500)
       .attr("height", 800)
       .style("border", "1px solid black")
@@ -25,6 +30,12 @@ function MapVis() {
   //method which carries out d3
   const drawMap = () => {
 
+    setMap();
+    animateMap();
+
+  }
+
+  const setMap = () => {
     //creating and defining an SVG object which appends to the body element
     let svg = d3.select(ref.current);
 
@@ -39,43 +50,37 @@ function MapVis() {
       .scale(230);
 
     // creating shapes based on the projection defined above
-    const path = d3.geoPath()
+    path = d3.geoPath()
       .projection(projection);
 
-    const g = svg.append('g');
 
     // Data and color scale
-    let data = new Map();
+    data = new Map();
 
     //defining a colour scale for the choropleths
-    let colorScale = d3.scaleQuantize()
+    colorScale = d3.scaleQuantize()
       //domain based on smallest and largest population
-      .domain([0, 1397715000])
+      .domain([0, 50000])
       .range(d3.schemePurples[7]);
 
     //defining zoom behaviour
     let zoom = d3.zoom()
       .scaleExtent([1, 8])
       .on('zoom', function (event, d) {
-        g.selectAll('path')
+        svg.selectAll('path')
           .attr('transform', event.transform);
       });
 
     svg.call(zoom);
 
-    let time = 0;
+    loadData();
 
-    //array that gets the map and population data
-    //object will be used later to see if the retrieval was successful
-    let promises = [
-      d3.json("world-countries.json"),
-      d3.csv("population.csv", function (d) {
-        data.set(d.code, +d.pop);
-      })
-    ]
+  };
 
-    const beta = .2143,
-      gamma = 1 / 10;
+  const SIRModel = (beta, gamma, population, time) => {
+    //setting the initial infection as 1
+    //dividing by population to get the percentage of the population that's infected
+    var initInfected = 1 / population;
 
     // Define the set of ordinary differential equations.
     const dSIR = (t, y) => [
@@ -85,44 +90,91 @@ function MapVis() {
     ];
 
     // Solve the system and log the result (reduced to the infection count).
-    const simulation = rungeKutta(dSIR, [1, .1, 0], [0, 30], 10);
+    const simulation = rungeKutta(dSIR, [1 - initInfected, initInfected, 0], [0, time], 10);
 
-    let S = simulation.map(x => x[0]);
-    let I = simulation.map(x => x[1]);
-    let R = simulation.map(x => x[2]);
+    S = simulation.map(x => Math.round(x[0] * population));
+    I = simulation.map(x => Math.round(x[1] * population));
+    R = simulation.map(x => Math.round(x[2] * population));
 
+    return [S, I, R];
+  };
 
+  const loadData = () => {
 
-    console.log(simulation, S, I, R);
+    //array that gets the map and population data
+    //object will be used later to see if the retrieval was successful
+    let promises = [
+      d3.json("gadm36_0.json"),
+      d3.csv("population.csv", function (d) {
+        data.set(d.code, +d.pop);
+        //adding the country and the simulation's value's for the country to the dictionary
+        SIRArray.set(d.code, SIRModel(0.2, 0.1, d.pop, 100));
 
+        //getting SIR values from the user selected parameters
 
-
+      })
+    ]
 
     //if the json and csv files are succesfully retreived, carry out ready()
     Promise.all(promises).then(ready);
+  };
 
-    function ready([topology]) {
 
-      //binding the json country data, creating a path for every json feature 
-      g.selectAll("path")
-        .data(topojson.feature(topology, topology.objects.countries1).features)
-        .enter()
-        .append("path")
-        .attr("d", path)
-        //defining style
-        // .style("fill", "White")
-        .style("stroke", "Black")
-        .style("stroke-width", 0.1)
-        //choropleth colour fill based on population
-        .style("fill", function (d) {
+  function ready([topology], countryData) {
 
-          //setting the population for each country from the .csv file
-          d.pop = data.get(d.id) || 0;
-          return colorScale(d.pop);
+    //binding the json country data, creating a path for every country
+    svg.selectAll(".country")
+      .data(topojson.feature(topology, topology.objects.world).features)
+      .enter()
+      .append("path")
+      .attr("class", "country") // give them a class for styling and access later
+      .attr("d", path)
+      .style("stroke", "Black")
+      .style("stroke-width", "0.1px");
 
-        });
-    }
+    console.log(SIRArray)
+    d3.selectAll('.country') // select all the countries
+      .style('fill', function (d) {
+
+        //getting the country code from the .csv file
+        countryCode = d.properties.iso3;
+        // (SIRArray.get(countryCode))[1]
+
+        //show the infected for the country
+        valueWanted = SIRArray.get(countryCode)[1][10]
+
+        // setting the population for each country from the .csv file
+        // d.pop = data.get(valueWanted) || 0;
+        console.log(countryCode, SIRArray.get(countryCode)[1][10]);
+
+        return colorScale(valueWanted);
+
+
+      });
   }
+
+  function sequence() {
+
+    console.log(time);
+    d3.selectAll('.countries').transition()
+      .duration(1000)
+      .attr("fill", function (d) {
+        // setting the population for each country from the .csv file
+        d.pop = data.get(d.id) || 0;
+        d.pop = [d.pop * S[time], d.pop * I[time], d.pop * S[time]];
+        // console.log(d.pop * I[time])
+        return colorScale(d.pop[time]);
+
+      })
+
+  }
+
+  function animateMap() {
+
+    time++;
+    sequence();
+
+  };
 
   return ( <
     div >
