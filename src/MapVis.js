@@ -6,12 +6,13 @@ import * as topojson from "topojson-client";
 import * as d3 from 'd3';
 import rungeKutta from 'runge-kutta';
 
-function MapVis() {
 
-  var data, g, path, S, I, R, colorScale, svg, countryCode, valueWanted;
+
+function MapVis() {
+  var data, g, path, S, I, R, colorScale, svg, countryCode, valueWanted, day, newInfection;
   //creating an empty dictionary to store SIR model results for each country
   let SIRArray = new Map();
-  let time = 0;
+  let time = 80;
 
   const ref = useRef();
 
@@ -31,7 +32,6 @@ function MapVis() {
   const drawMap = () => {
 
     setMap();
-    animateMap();
 
   }
 
@@ -40,8 +40,8 @@ function MapVis() {
     let svg = d3.select(ref.current);
 
     let Promise = require('promise');
-
     const rk4 = require("ode-rk4");
+    var tip = require("d3-tip");
 
 
     //defining the projection as the Natural Earth projection
@@ -60,8 +60,8 @@ function MapVis() {
     //defining a colour scale for the choropleths
     colorScale = d3.scaleQuantize()
       //domain based on smallest and largest population
-      .domain([0, 50000])
-      .range(d3.schemePurples[7]);
+      .domain([0, 10000])
+      .range(d3.schemePurples[9]);
 
     //defining zoom behaviour
     let zoom = d3.zoom()
@@ -90,7 +90,7 @@ function MapVis() {
     ];
 
     // Solve the system and log the result (reduced to the infection count).
-    const simulation = rungeKutta(dSIR, [1 - initInfected, initInfected, 0], [0, time], 10);
+    const simulation = rungeKutta(dSIR, [1 - initInfected, initInfected, 0], [0, time], 1);
 
     S = simulation.map(x => Math.round(x[0] * population));
     I = simulation.map(x => Math.round(x[1] * population));
@@ -106,7 +106,9 @@ function MapVis() {
     let promises = [
       d3.json("gadm36_0.json"),
       d3.csv("population.csv", function (d) {
+
         data.set(d.code, +d.pop);
+
         //adding the country and the simulation's value's for the country to the dictionary
         SIRArray.set(d.code, SIRModel(0.2, 0.1, d.pop, 100));
 
@@ -122,6 +124,7 @@ function MapVis() {
 
   function ready([topology], countryData) {
 
+
     //binding the json country data, creating a path for every country
     svg.selectAll(".country")
       .data(topojson.feature(topology, topology.objects.world).features)
@@ -130,51 +133,47 @@ function MapVis() {
       .attr("class", "country") // give them a class for styling and access later
       .attr("d", path)
       .style("stroke", "Black")
-      .style("stroke-width", "0.1px");
+      .style("stroke-width", "0.1px")
+      .style('fill', "White");
 
-    console.log(SIRArray)
-    d3.selectAll('.country') // select all the countries
-      .style('fill', function (d) {
-
-        //getting the country code from the .csv file
-        countryCode = d.properties.iso3;
-        // (SIRArray.get(countryCode))[1]
-
-        //show the infected for the country
-        valueWanted = SIRArray.get(countryCode)[1][10]
-
-        // setting the population for each country from the .csv file
-        // d.pop = data.get(valueWanted) || 0;
-        console.log(countryCode, SIRArray.get(countryCode)[1][10]);
-
-        return colorScale(valueWanted);
-
-
-      });
+      //call the animation
+    var timer = d3.interval(sequence, 1000);
   }
 
   function sequence() {
 
-    console.log(time);
-    d3.selectAll('.countries').transition()
+    var inf = new Map();
+
+    inf = function () {
+      for (var key in SIRArray) {
+        return SIRArray.get(key)[1]
+      }
+    }
+ 
+    console.log("asd", time);
+
+    d3.selectAll('.country')
+      .transition()
       .duration(1000)
-      .attr("fill", function (d) {
-        // setting the population for each country from the .csv file
-        d.pop = data.get(d.id) || 0;
-        d.pop = [d.pop * S[time], d.pop * I[time], d.pop * S[time]];
-        // console.log(d.pop * I[time])
-        return colorScale(d.pop[time]);
+      .delay(1000)
+      .style("fill", function (d) {
 
-      })
+        //getting the country code from the .csv file
+        countryCode = d.properties.iso3;
+        //get infections for tool tips for certain year 
 
-  }
+        //show the infected for the country
+        valueWanted = SIRArray.get(countryCode)[1][time];
 
-  function animateMap() {
+        return colorScale(valueWanted);
+
+      });
 
     time++;
-    sequence();
+    
+    
 
-  };
+  }
 
   return ( <
     div >
